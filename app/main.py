@@ -1,6 +1,7 @@
 from fastapi import FastAPI, status, HTTPException, Depends
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
+from sqlalchemy.sql.functions import ReturnTypeFromArgs
 import uuid
 from . import models, schemas
 from .database import engine, get_db
@@ -13,6 +14,10 @@ app = FastAPI()
 @app.get("/", tags=["get"])
 async def root():
     return {"message": "Hello world"}
+
+
+class unaccent(ReturnTypeFromArgs):
+    inherit_cache = True
 
 
 @app.post(
@@ -67,20 +72,32 @@ async def get_pessoas(id: str, db: Session = Depends(get_db)) -> schemas.Pessoa:
     return pessoa
 
 
-@app.get("/pessoas_busca/{term}", tags=["get"])
-async def pessoas_busca(term: str, db: Session = Depends(get_db)):
-    pessoa = db.query(models.Pessoa).filter(models.Pessoa.stack.in_([{term}])).all()
+@app.get("/pessoas_busca/", tags=["get"])
+async def pessoas_busca(t: str, limit: int = 50, db: Session = Depends(get_db)):
+    if not t.startswith("?t="):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Bad Request.",
+        )
+    else:
+        t = t[3:]
+
+    pessoa = db.query(models.Pessoa).filter(models.Pessoa.stack.in_([{t}])).all()
+
     if not pessoa:
-        term = f"%{term}%"
+        t = f"%{t}%"
         pessoa = (
             db.query(models.Pessoa)
             .filter(
-                or_(models.Pessoa.apelido.ilike(term), models.Pessoa.nome.ilike(term))
+                or_(
+                    unaccent(models.Pessoa.apelido).ilike(t),
+                    models.Pessoa.nome.ilike(t),
+                )
             )
             .all()
         )
 
-    return pessoa if pessoa else []
+    return pessoa[:limit] if pessoa else []
 
 
 @app.get("/contagem_pessoas", tags=["get"])
